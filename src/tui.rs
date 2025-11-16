@@ -25,6 +25,8 @@ use std::time::Duration;
 enum InputField {
     Mode,
     Energy,
+    Gantry,
+    FieldSize,
     Dose,
     Command,
 }
@@ -36,6 +38,9 @@ pub struct TuiApp {
     current_field: InputField,
     mode_input: String,
     energy_input: String,
+    gantry_input: String,
+    field_x_input: String,
+    field_y_input: String,
     dose_input: String,
     command_input: String,
 }
@@ -49,6 +54,9 @@ impl TuiApp {
             current_field: InputField::Mode,
             mode_input: String::new(),
             energy_input: String::new(),
+            gantry_input: String::new(),
+            field_x_input: String::new(),
+            field_y_input: String::new(),
             dose_input: String::new(),
             command_input: String::new(),
         }
@@ -125,6 +133,8 @@ impl TuiApp {
         match self.current_field {
             InputField::Mode => self.handle_mode_input(key),
             InputField::Energy => self.handle_energy_input(key),
+            InputField::Gantry => self.handle_gantry_input(key),
+            InputField::FieldSize => self.handle_field_size_input(key),
             InputField::Dose => self.handle_dose_input(key),
             InputField::Command => self.handle_command_input(key),
         }
@@ -140,8 +150,8 @@ impl TuiApp {
                 s.console_meos.beam_energy = BeamEnergy::E25;
                 self.energy_input = "25".to_string();
                 s.add_log("Mode set to X-Ray, energy auto-set to 25 MeV".to_string());
-                // Move to dose field (skip energy since it's auto-set)
-                self.current_field = InputField::Dose;
+                // Move to gantry field (skip energy since it's auto-set)
+                self.current_field = InputField::Gantry;
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 self.mode_input = "E".to_string();
@@ -211,6 +221,81 @@ impl TuiApp {
                     };
                     s.add_log(format!("Energy set to {} MeV", energy_val));
                 }
+                // Move to gantry field
+                self.current_field = InputField::Gantry;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_gantry_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                self.gantry_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.gantry_input.pop();
+            }
+            KeyCode::Enter => {
+                if self.gantry_input.is_empty() {
+                    // Copy from reference
+                    let s = self.state.read();
+                    self.gantry_input = s.reference_params.gantry_angle.to_string();
+                }
+
+                // Parse and set gantry angle
+                if let Ok(angle) = self.gantry_input.parse::<u16>() {
+                    let mut s = self.state.write();
+                    s.console_params.gantry_angle = angle.min(359);
+                    s.editing_taking_place = true;
+                }
+                // Move to field size
+                self.current_field = InputField::FieldSize;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_field_size_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char(c) if c.is_ascii_digit() || c == '.' || c == 'x' || c == 'X' => {
+                if c == 'x' || c == 'X' {
+                    if !self.field_x_input.is_empty() && self.field_y_input.is_empty() {
+                        // User typing 'x' separator
+                        // field_x is done, now entering field_y
+                        return;
+                    }
+                }
+                if self.field_y_input.is_empty() {
+                    self.field_x_input.push(c);
+                } else {
+                    self.field_y_input.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if !self.field_y_input.is_empty() {
+                    self.field_y_input.pop();
+                } else if !self.field_x_input.is_empty() {
+                    self.field_x_input.pop();
+                }
+            }
+            KeyCode::Enter => {
+                if self.field_x_input.is_empty() {
+                    // Copy from reference
+                    let s = self.state.read();
+                    self.field_x_input = s.reference_params.field_size_x.to_string();
+                    self.field_y_input = s.reference_params.field_size_y.to_string();
+                }
+
+                // Parse and set field sizes
+                if let Ok(size_x) = self.field_x_input.parse::<f32>() {
+                    if let Ok(size_y) = self.field_y_input.parse::<f32>() {
+                        let mut s = self.state.write();
+                        s.console_params.field_size_x = size_x.min(40.0);
+                        s.console_params.field_size_y = size_y.min(40.0);
+                        s.editing_taking_place = true;
+                    }
+                }
                 // Move to dose field
                 self.current_field = InputField::Dose;
             }
@@ -279,6 +364,9 @@ impl TuiApp {
                 // Clear inputs and return to mode field
                 self.mode_input.clear();
                 self.energy_input.clear();
+                self.gantry_input.clear();
+                self.field_x_input.clear();
+                self.field_y_input.clear();
                 self.dose_input.clear();
                 self.current_field = InputField::Mode;
             }
@@ -290,6 +378,9 @@ impl TuiApp {
                 // Clear inputs
                 self.mode_input.clear();
                 self.energy_input.clear();
+                self.gantry_input.clear();
+                self.field_x_input.clear();
+                self.field_y_input.clear();
                 self.dose_input.clear();
                 self.current_field = InputField::Mode;
             }
@@ -300,6 +391,9 @@ impl TuiApp {
                 // Clear inputs and return to mode field
                 self.mode_input.clear();
                 self.energy_input.clear();
+                self.gantry_input.clear();
+                self.field_x_input.clear();
+                self.field_y_input.clear();
                 self.dose_input.clear();
                 self.current_field = InputField::Mode;
             }

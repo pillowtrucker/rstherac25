@@ -130,6 +130,33 @@ pub struct Meos {
     pub collimator: CollimatorPosition,
 }
 
+/// Treatment parameters - additional settings beyond MEOS
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TreatmentParams {
+    /// Gantry angle in degrees (0-360)
+    pub gantry_angle: u16,
+    /// Collimator rotation angle in degrees (0-360)
+    pub collimator_angle: u16,
+    /// Field size X in cm (0-40)
+    pub field_size_x: f32,
+    /// Field size Y in cm (0-40)
+    pub field_size_y: f32,
+    /// Dose rate in cGy/min
+    pub dose_rate: f32,
+}
+
+impl Default for TreatmentParams {
+    fn default() -> Self {
+        Self {
+            gantry_angle: 0,
+            collimator_angle: 0,
+            field_size_x: 10.0,
+            field_size_y: 10.0,
+            dose_rate: 100.0,
+        }
+    }
+}
+
 impl Default for Meos {
     fn default() -> Self {
         Self {
@@ -208,6 +235,12 @@ pub struct TheracState {
     pub hardware_meos: Meos,
     /// Reference/prescribed MEOS - what the treatment plan specifies
     pub reference_meos: Meos,
+    /// Console treatment parameters
+    pub console_params: TreatmentParams,
+    /// Hardware treatment parameters
+    pub hardware_params: TreatmentParams,
+    /// Reference treatment parameters
+    pub reference_params: TreatmentParams,
     /// Current treatment phase
     pub phase: TPhase,
     /// Data entry complete flag
@@ -216,6 +249,14 @@ pub struct TheracState {
     pub f_small: bool,
     /// Class3 counter - incremented during setup verification
     pub class3: u8,
+    /// Bending magnet flag - indicates electron beam bending magnet status
+    pub bending_magnet_flag: bool,
+    /// Editing taking place - operator is modifying parameters
+    pub editing_taking_place: bool,
+    /// Reset pending - system reset has been requested
+    pub reset_pending: bool,
+    /// Class3 ignore - ignore Class3 verification
+    pub class3_ignore: bool,
     /// Malfunction counter
     pub malfunction_count: u32,
     /// Total dose delivered (in cGy - centigray)
@@ -224,6 +265,8 @@ pub struct TheracState {
     pub dose_target: f64,
     /// Reference dose target (in cGy)
     pub reference_dose_target: f64,
+    /// Treatment outcome message
+    pub treatment_outcome: String,
     /// Treatment log
     pub log: Vec<String>,
     /// Last malfunction message
@@ -264,18 +307,39 @@ impl Default for TheracState {
 
         let reference_dose = (rng.gen_range(150.0_f64..250.0_f64)).round();
 
+        // Generate random reference treatment parameters
+        let reference_params = TreatmentParams {
+            gantry_angle: rng.gen_range(0..360),
+            collimator_angle: rng.gen_range(0..360),
+            field_size_x: rng.gen_range(5.0_f32..20.0_f32).round(),
+            field_size_y: rng.gen_range(5.0_f32..20.0_f32).round(),
+            dose_rate: match beam_type {
+                BeamType::XRay => rng.gen_range(80.0_f32..120.0_f32).round(),
+                BeamType::Electron => rng.gen_range(100.0_f32..200.0_f32).round(),
+                BeamType::Undefined => 100.0,
+            },
+        };
+
         Self {
             console_meos: Meos::default(),
             hardware_meos: Meos::default(),
             reference_meos,
+            console_params: TreatmentParams::default(),
+            hardware_params: TreatmentParams::default(),
+            reference_params,
             phase: TPhase::Reset,
             data_entry_complete: false,
             f_small: false,
             class3: 0,
+            bending_magnet_flag: false,
+            editing_taking_place: false,
+            reset_pending: false,
+            class3_ignore: false,
             malfunction_count: 0,
             dose_delivered: 0.0,
             dose_target: 200.0,
             reference_dose_target: reference_dose,
+            treatment_outcome: String::new(),
             log: Vec::new(),
             last_malfunction: None,
         }
@@ -320,11 +384,26 @@ impl TheracState {
 
         self.reference_dose_target = (rng.gen_range(150.0_f64..250.0_f64)).round();
 
+        self.reference_params = TreatmentParams {
+            gantry_angle: rng.gen_range(0..360),
+            collimator_angle: rng.gen_range(0..360),
+            field_size_x: rng.gen_range(5.0_f32..20.0_f32).round(),
+            field_size_y: rng.gen_range(5.0_f32..20.0_f32).round(),
+            dose_rate: match beam_type {
+                BeamType::XRay => rng.gen_range(80.0_f32..120.0_f32).round(),
+                BeamType::Electron => rng.gen_range(100.0_f32..200.0_f32).round(),
+                BeamType::Undefined => 100.0,
+            },
+        };
+
         self.add_log(format!(
-            "New prescription: {} @ {} - {} cGy",
+            "New prescription: {} @ {} - {} cGy - Gantry {} deg - Field {}x{} cm",
             self.reference_meos.beam_type,
             self.reference_meos.beam_energy,
-            self.reference_dose_target
+            self.reference_dose_target,
+            self.reference_params.gantry_angle,
+            self.reference_params.field_size_x,
+            self.reference_params.field_size_y
         ));
     }
 
@@ -341,10 +420,16 @@ impl TheracState {
         self.data_entry_complete = false;
         self.f_small = false;
         self.class3 = 0;
+        self.bending_magnet_flag = false;
+        self.editing_taking_place = false;
+        self.reset_pending = false;
+        self.class3_ignore = false;
         self.dose_delivered = 0.0;
         self.dose_target = 200.0;
         self.last_malfunction = None;
+        self.treatment_outcome = String::new();
         self.console_meos = Meos::default();
+        self.console_params = TreatmentParams::default();
         self.add_log("System reset".to_string());
         self.generate_new_reference();
     }

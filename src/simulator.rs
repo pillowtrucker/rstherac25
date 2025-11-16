@@ -45,7 +45,7 @@ pub async fn housekeeper(state: SharedTheracState) {
     }
 }
 
-/// Synchronize collimator position
+/// Synchronize collimator position and other hardware parameters
 /// This is the concurrent task that creates the race condition with zap_the_specimen
 async fn sync_collimator(state: SharedTheracState) {
     let needs_sync = {
@@ -69,8 +69,10 @@ async fn sync_collimator(state: SharedTheracState) {
             }
         }
 
-        // Simulate physical movement time (magnet hysteresis)
-        sleep(Duration::from_millis(100)).await;
+        // Simulate physical movement time (magnet hysteresis + mechanical delays)
+        // Real Therac-25 had ~100ms, but we use 800ms to make the race window
+        // more educational while still being realistic
+        sleep(Duration::from_millis(800)).await;
 
         // Move to target position
         let target_position = match console_beam_type {
@@ -82,8 +84,31 @@ async fn sync_collimator(state: SharedTheracState) {
         {
             let mut s = state.write();
             s.hardware_meos.collimator = target_position;
-            s.add_log(format!("Collimator moved to {}", target_position));
+            // Also sync beam type and energy during collimator movement
+            s.hardware_meos.beam_type = s.console_meos.beam_type;
+            s.hardware_meos.beam_energy = s.console_meos.beam_energy;
+            let beam_type = s.hardware_meos.beam_type;
+            let beam_energy = s.hardware_meos.beam_energy;
+            s.add_log(format!("Hardware synced: {} @ {} with collimator {}",
+                beam_type,
+                beam_energy,
+                target_position));
         }
+    }
+
+    // Also sync other hardware parameters (gantry, field size, etc.)
+    // This happens continuously and more slowly
+    let params_need_sync = {
+        let s = state.read();
+        s.phase != TPhase::PatientTreatment && s.console_params != s.hardware_params
+    };
+
+    if params_need_sync {
+        // Simulate mechanical movement delays for gantry, collimator rotation, etc.
+        sleep(Duration::from_millis(200)).await;
+
+        let mut s = state.write();
+        s.hardware_params = s.console_params;
     }
 }
 
@@ -324,14 +349,16 @@ pub fn resume_treatment(state: SharedTheracState) {
 }
 
 /// Complete data entry
+/// Note: This does NOT immediately sync hardware - that happens asynchronously via the housekeeper
+/// This is intentional and creates the race condition!
 pub fn complete_data_entry(state: SharedTheracState) {
     let mut s = state.write();
     if s.phase == TPhase::DataEntry {
         s.data_entry_complete = true;
-        // Copy console settings to hardware (initial setup)
-        s.hardware_meos.beam_type = s.console_meos.beam_type;
-        s.hardware_meos.beam_energy = s.console_meos.beam_energy;
-        s.add_log("Data entry marked complete".to_string());
+        s.editing_taking_place = false;
+        // DO NOT copy console settings to hardware here - let the housekeeper do it
+        // This creates the race condition window
+        s.add_log("Data entry complete - hardware sync pending".to_string());
     }
 }
 
