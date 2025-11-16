@@ -206,6 +206,8 @@ pub struct TheracState {
     pub console_meos: Meos,
     /// Hardware MEOS - actual hardware configuration
     pub hardware_meos: Meos,
+    /// Reference/prescribed MEOS - what the treatment plan specifies
+    pub reference_meos: Meos,
     /// Current treatment phase
     pub phase: TPhase,
     /// Data entry complete flag
@@ -220,6 +222,8 @@ pub struct TheracState {
     pub dose_delivered: f64,
     /// Target dose (in cGy)
     pub dose_target: f64,
+    /// Reference dose target (in cGy)
+    pub reference_dose_target: f64,
     /// Treatment log
     pub log: Vec<String>,
     /// Last malfunction message
@@ -228,16 +232,50 @@ pub struct TheracState {
 
 impl Default for TheracState {
     fn default() -> Self {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        // Generate random reference parameters (prescribed treatment)
+        let beam_type = if rng.gen_bool(0.5) {
+            BeamType::XRay
+        } else {
+            BeamType::Electron
+        };
+
+        let beam_energy = match rng.gen_range(0..5) {
+            0 => BeamEnergy::E5,
+            1 => BeamEnergy::E10,
+            2 => BeamEnergy::E15,
+            3 => BeamEnergy::E20,
+            _ => BeamEnergy::E25,
+        };
+
+        let collimator = match beam_type {
+            BeamType::XRay => CollimatorPosition::InPosition,
+            BeamType::Electron => CollimatorPosition::OutOfPosition,
+            BeamType::Undefined => CollimatorPosition::OutOfPosition,
+        };
+
+        let reference_meos = Meos {
+            beam_type,
+            beam_energy,
+            collimator,
+        };
+
+        let reference_dose = (rng.gen_range(150.0_f64..250.0_f64)).round();
+
         Self {
             console_meos: Meos::default(),
             hardware_meos: Meos::default(),
+            reference_meos,
             phase: TPhase::Reset,
             data_entry_complete: false,
             f_small: false,
             class3: 0,
             malfunction_count: 0,
             dose_delivered: 0.0,
-            dose_target: 200.0, // Default 200 cGy
+            dose_target: 200.0,
+            reference_dose_target: reference_dose,
             log: Vec::new(),
             last_malfunction: None,
         }
@@ -247,6 +285,47 @@ impl Default for TheracState {
 impl TheracState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Generate new reference parameters (called on reset)
+    pub fn generate_new_reference(&mut self) {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        let beam_type = if rng.gen_bool(0.5) {
+            BeamType::XRay
+        } else {
+            BeamType::Electron
+        };
+
+        let beam_energy = match rng.gen_range(0..5) {
+            0 => BeamEnergy::E5,
+            1 => BeamEnergy::E10,
+            2 => BeamEnergy::E15,
+            3 => BeamEnergy::E20,
+            _ => BeamEnergy::E25,
+        };
+
+        let collimator = match beam_type {
+            BeamType::XRay => CollimatorPosition::InPosition,
+            BeamType::Electron => CollimatorPosition::OutOfPosition,
+            BeamType::Undefined => CollimatorPosition::OutOfPosition,
+        };
+
+        self.reference_meos = Meos {
+            beam_type,
+            beam_energy,
+            collimator,
+        };
+
+        self.reference_dose_target = (rng.gen_range(150.0_f64..250.0_f64)).round();
+
+        self.add_log(format!(
+            "New prescription: {} @ {} - {} cGy",
+            self.reference_meos.beam_type,
+            self.reference_meos.beam_energy,
+            self.reference_dose_target
+        ));
     }
 
     pub fn add_log(&mut self, message: String) {
@@ -263,8 +342,11 @@ impl TheracState {
         self.f_small = false;
         self.class3 = 0;
         self.dose_delivered = 0.0;
+        self.dose_target = 200.0;
         self.last_malfunction = None;
+        self.console_meos = Meos::default();
         self.add_log("System reset".to_string());
+        self.generate_new_reference();
     }
 }
 

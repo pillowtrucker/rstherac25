@@ -83,34 +83,40 @@ Run the simulator with TUI:
 cargo run --release
 ```
 
-### Controls
+### Operator Interface
 
-In the TUI:
+The TUI simulates the actual Therac-25 operator terminal with form-based data entry:
 
-**Basic Controls:**
-- `q`, `ESC` - Quit simulator
-- `?`, `F1` - Show help
-- `r` - Reset system
+**Data Entry Workflow:**
 
-**Data Entry Mode:**
-- `1` - Set beam type to X-Ray
-- `2` - Set beam type to Electron
-- `5` - Set energy to 5 MeV
-- `6` - Set energy to 10 MeV
-- `7` - Set energy to 15 MeV
-- `8` - Set energy to 20 MeV
-- `9` - Set energy to 25 MeV
-- `t` - Toggle collimator position (manual override - dangerous!)
-- `d` - Complete data entry
+1. **Mode Entry:** Type `X` for X-ray or `E` for Electron
+   - X-ray mode automatically sets energy to 25 MeV (as per the real Therac-25)
+   - Electron mode moves you to energy entry
 
-**Treatment Controls:**
-- `s` - Start treatment
-- `p` - Pause treatment
-- `c` - Continue/resume treatment
+2. **Energy Entry:** Type energy value (5, 10, 15, 20, or 25)
+   - Press ENTER without typing to copy from prescription
+   - Press ENTER after typing to proceed to dose
 
-**Random Generation:**
-- `g` - Generate random safe parameters
-- `b` - **Generate bug-triggering parameters (race condition!)**
+3. **Dose Entry:** Type target dose in cGy
+   - Press ENTER without typing to copy from prescription
+   - Press ENTER after typing to proceed to command prompt
+
+4. **Command Prompt:** Type a command and press ENTER
+   - `t` or `treat` - Start treatment
+   - `r` or `reset` - Reset system and generate new prescription
+   - `p` or `proceed` - Complete data entry (setup mode)
+   - `s` or `stop` - Pause active treatment
+   - `c` or `continue` - Resume paused treatment
+   - `q` or `quit` - Exit simulator
+   - Press ESC to return to Mode entry
+
+**Quick Entry Feature:**
+- Press ENTER on any field without typing to copy the prescription value
+- This simulates the real operator workflow that led to the race condition
+
+**Global Commands:**
+- `F1` - Show help screen
+- `Ctrl+C` - Emergency quit
 
 ### WebAssembly Version
 
@@ -133,23 +139,38 @@ Then open http://localhost:8080 in your browser.
 
 ## How to Trigger the Race Condition
 
-### Method 1: Manual (Quick Mode Changes)
+The Therac-25 race condition typically occurred when operators:
+1. Entered X-ray mode (which auto-sets high energy)
+2. Noticed a mistake and quickly changed to Electron mode
+3. Started treatment before the hardware sync completed
+4. Result: High-energy beam fired without the flatness filter = 100x overdose
 
-1. Start the simulator
-2. Press `1` to set X-Ray mode
-3. Press `d` to complete data entry (this triggers hardware sync)
-4. **Quickly** press `r` to reset, then `2` for Electron mode, then `d` again
-5. Press `s` to start treatment while hardware is still syncing
-6. Watch for "MALFUNCTION 54" or worse - a safety violation
+### Method 1: Realistic Operator Error (Quick Mode Change)
 
-### Method 2: Automatic (Bug Trigger Button)
+This simulates the exact workflow that caused real deaths:
 
-1. Start the simulator
-2. Enter any initial parameters (e.g., press `1` for X-Ray)
-3. Press `d` to complete data entry
-4. Press `b` to generate race-condition-prone parameters
-5. Press `s` to start treatment
-6. The bug trigger intentionally sets mismatched console/hardware state
+1. **Start the simulator** - `cargo run --release`
+2. **Enter X-ray mode** - Type `X` (energy auto-sets to 25 MeV)
+3. **"Oops, wrong mode!"** - Press Backspace to clear
+4. **Quickly change to Electron** - Type `E`
+5. **Enter energy** - Type `15` and press ENTER
+6. **Enter dose** - Press ENTER to copy prescription (or type a value)
+7. **Start treatment immediately** - Type `t` and press ENTER
+8. **Watch what happens** - The hardware may still be syncing from X-ray mode
+
+The race window is small but real. If you start treatment while the hardware is still moving the collimator, you'll either get:
+- **MALFUNCTION 54** if the mismatch is detected
+- **CRITICAL SAFETY VIOLATION** if the beam fires during the sync
+
+### Method 2: Prescription Workflow
+
+This demonstrates how quick-entry features can be dangerous:
+
+1. Start the simulator (it generates a random prescription)
+2. If prescription shows **X-ray**, type `X` then press ENTER on dose
+3. At command prompt, type `r` to reset (generates new prescription)
+4. If new prescription shows **Electron**, quickly enter parameters and treat
+5. The previous X-ray configuration may still be in hardware
 
 ### What You'll See
 

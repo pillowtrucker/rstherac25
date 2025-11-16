@@ -1,6 +1,7 @@
 //! Terminal User Interface for Therac-25 simulator
 //!
-//! Provides an interactive TUI for operating the simulated Therac-25 machine
+//! Provides an accurate recreation of the Therac-25 operator interface with
+//! form-based data entry and command input
 
 use crate::*;
 use crate::simulator::*;
@@ -20,10 +21,23 @@ use crossterm::{
 use std::io;
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputField {
+    Mode,
+    Energy,
+    Dose,
+    Command,
+}
+
 pub struct TuiApp {
     state: SharedTheracState,
     should_quit: bool,
     help_visible: bool,
+    current_field: InputField,
+    mode_input: String,
+    energy_input: String,
+    dose_input: String,
+    command_input: String,
 }
 
 impl TuiApp {
@@ -32,6 +46,11 @@ impl TuiApp {
             state,
             should_quit: false,
             help_visible: false,
+            current_field: InputField::Mode,
+            mode_input: String::new(),
+            energy_input: String::new(),
+            dose_input: String::new(),
+            command_input: String::new(),
         }
     }
 
@@ -42,6 +61,12 @@ impl TuiApp {
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+
+        // Initialize with data entry mode
+        {
+            let mut s = self.state.write();
+            s.phase = TPhase::DataEntry;
+        }
 
         // Run the TUI loop
         let result = self.tui_loop(&mut terminal).await;
@@ -83,86 +108,220 @@ impl TuiApp {
             return;
         }
 
+        // Global commands
         match key {
-            KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
-            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => self.should_quit = true,
-            KeyCode::Char('?') | KeyCode::F(1) => self.help_visible = true,
-            KeyCode::Char('r') => {
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+                return;
+            }
+            KeyCode::F(1) => {
+                self.help_visible = true;
+                return;
+            }
+            _ => {}
+        }
+
+        // Handle input based on current field
+        match self.current_field {
+            InputField::Mode => self.handle_mode_input(key),
+            InputField::Energy => self.handle_energy_input(key),
+            InputField::Dose => self.handle_dose_input(key),
+            InputField::Command => self.handle_command_input(key),
+        }
+    }
+
+    fn handle_mode_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                self.mode_input = "X".to_string();
                 let mut s = self.state.write();
-                s.reset();
-            },
-            KeyCode::Char('d') => {
-                complete_data_entry(self.state.clone());
-            },
-            KeyCode::Char('s') => {
-                start_treatment(self.state.clone());
-            },
-            KeyCode::Char('p') => {
-                stop_treatment(self.state.clone());
-            },
-            KeyCode::Char('c') => {
-                resume_treatment(self.state.clone());
-            },
-            KeyCode::Char('1') => {
-                self.update_beam_type(BeamType::XRay);
-            },
-            KeyCode::Char('2') => {
-                self.update_beam_type(BeamType::Electron);
-            },
-            KeyCode::Char('5') => {
-                self.update_beam_energy(BeamEnergy::E5);
-            },
-            KeyCode::Char('6') => {
-                self.update_beam_energy(BeamEnergy::E10);
-            },
-            KeyCode::Char('7') => {
-                self.update_beam_energy(BeamEnergy::E15);
-            },
-            KeyCode::Char('8') => {
-                self.update_beam_energy(BeamEnergy::E20);
-            },
-            KeyCode::Char('9') => {
-                self.update_beam_energy(BeamEnergy::E25);
-            },
-            KeyCode::Char('g') => {
-                // Generate random safe parameters
-                let params = generate_random_parameters();
-                update_console_meos(self.state.clone(), params);
-            },
-            KeyCode::Char('b') => {
-                // Generate race condition parameters (bug trigger)
-                let current = self.state.read().console_meos;
-                let params = generate_race_condition_parameters(current);
-                update_console_meos(self.state.clone(), params);
-            },
-            KeyCode::Char('t') => {
-                // Toggle collimator (manual override - dangerous!)
+                s.console_meos.beam_type = BeamType::XRay;
+                // Auto-set energy to 25 MeV for X-ray mode (as per real Therac-25)
+                s.console_meos.beam_energy = BeamEnergy::E25;
+                self.energy_input = "25".to_string();
+                s.add_log("Mode set to X-Ray, energy auto-set to 25 MeV".to_string());
+                // Move to dose field (skip energy since it's auto-set)
+                self.current_field = InputField::Dose;
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                self.mode_input = "E".to_string();
                 let mut s = self.state.write();
-                s.console_meos.collimator = match s.console_meos.collimator {
-                    CollimatorPosition::InPosition => CollimatorPosition::OutOfPosition,
-                    CollimatorPosition::OutOfPosition => CollimatorPosition::InPosition,
-                    CollimatorPosition::Transitioning => CollimatorPosition::InPosition,
-                };
-                let collimator_pos = s.console_meos.collimator;
-                s.add_log(format!("Collimator manually set to {}", collimator_pos));
-            },
+                s.console_meos.beam_type = BeamType::Electron;
+                s.add_log("Mode set to Electron".to_string());
+                // Move to energy field
+                self.current_field = InputField::Energy;
+            }
+            KeyCode::Enter => {
+                // Copy from reference
+                let s = self.state.read();
+                match s.reference_meos.beam_type {
+                    BeamType::XRay => {
+                        drop(s);
+                        self.handle_mode_input(KeyCode::Char('x'));
+                    }
+                    BeamType::Electron => {
+                        drop(s);
+                        self.handle_mode_input(KeyCode::Char('e'));
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Backspace => {
+                self.mode_input.clear();
+            }
             _ => {}
         }
     }
 
-    fn update_beam_type(&mut self, beam_type: BeamType) {
-        let mut s = self.state.write();
-        if s.phase == TPhase::DataEntry {
-            s.console_meos.beam_type = beam_type;
-            s.add_log(format!("Beam type set to {}", beam_type));
+    fn handle_energy_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                self.energy_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.energy_input.pop();
+            }
+            KeyCode::Enter => {
+                if self.energy_input.is_empty() {
+                    // Copy from reference
+                    let s = self.state.read();
+                    let ref_energy = match s.reference_meos.beam_energy {
+                        BeamEnergy::E5 => 5,
+                        BeamEnergy::E10 => 10,
+                        BeamEnergy::E15 => 15,
+                        BeamEnergy::E20 => 20,
+                        BeamEnergy::E25 => 25,
+                    };
+                    self.energy_input = ref_energy.to_string();
+                }
+
+                // Parse and set energy
+                if let Ok(energy_val) = self.energy_input.parse::<u8>() {
+                    let mut s = self.state.write();
+                    s.console_meos.beam_energy = match energy_val {
+                        5 => BeamEnergy::E5,
+                        10 => BeamEnergy::E10,
+                        15 => BeamEnergy::E15,
+                        20 => BeamEnergy::E20,
+                        25 => BeamEnergy::E25,
+                        _ => {
+                            s.add_log(format!("Invalid energy: {}. Use 5, 10, 15, 20, or 25", energy_val));
+                            return;
+                        }
+                    };
+                    s.add_log(format!("Energy set to {} MeV", energy_val));
+                }
+                // Move to dose field
+                self.current_field = InputField::Dose;
+            }
+            _ => {}
         }
     }
 
-    fn update_beam_energy(&mut self, energy: BeamEnergy) {
-        let mut s = self.state.write();
-        if s.phase == TPhase::DataEntry {
-            s.console_meos.beam_energy = energy;
-            s.add_log(format!("Beam energy set to {}", energy));
+    fn handle_dose_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char(c) if c.is_ascii_digit() || c == '.' => {
+                self.dose_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.dose_input.pop();
+            }
+            KeyCode::Enter => {
+                if self.dose_input.is_empty() {
+                    // Copy from reference
+                    let s = self.state.read();
+                    self.dose_input = s.reference_dose_target.to_string();
+                }
+
+                // Parse and set dose
+                if let Ok(dose_val) = self.dose_input.parse::<f64>() {
+                    let mut s = self.state.write();
+                    s.dose_target = dose_val;
+                    s.add_log(format!("Dose target set to {} cGy", dose_val));
+                }
+                // Move to command field
+                self.current_field = InputField::Command;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_command_input(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Char(c) => {
+                self.command_input.push(c);
+            }
+            KeyCode::Backspace => {
+                self.command_input.pop();
+            }
+            KeyCode::Enter => {
+                self.execute_command();
+                self.command_input.clear();
+            }
+            KeyCode::Esc => {
+                // Clear command and go back to mode field
+                self.command_input.clear();
+                self.current_field = InputField::Mode;
+            }
+            _ => {}
+        }
+    }
+
+    fn execute_command(&mut self) {
+        let cmd = self.command_input.to_lowercase();
+
+        match cmd.as_str() {
+            "t" | "treat" => {
+                // Complete data entry and start treatment
+                complete_data_entry(self.state.clone());
+                start_treatment(self.state.clone());
+
+                // Clear inputs and return to mode field
+                self.mode_input.clear();
+                self.energy_input.clear();
+                self.dose_input.clear();
+                self.current_field = InputField::Mode;
+            }
+            "r" | "reset" => {
+                // Reset system and generate new reference
+                let mut s = self.state.write();
+                s.reset();
+
+                // Clear inputs
+                self.mode_input.clear();
+                self.energy_input.clear();
+                self.dose_input.clear();
+                self.current_field = InputField::Mode;
+            }
+            "p" | "proceed" => {
+                // Complete data entry (for setup)
+                complete_data_entry(self.state.clone());
+
+                // Clear inputs and return to mode field
+                self.mode_input.clear();
+                self.energy_input.clear();
+                self.dose_input.clear();
+                self.current_field = InputField::Mode;
+            }
+            "s" | "stop" => {
+                // Stop treatment
+                stop_treatment(self.state.clone());
+            }
+            "c" | "continue" => {
+                // Resume treatment
+                resume_treatment(self.state.clone());
+            }
+            "q" | "quit" => {
+                self.should_quit = true;
+            }
+            "" => {
+                // Empty command, just return to mode field
+                self.current_field = InputField::Mode;
+            }
+            _ => {
+                let mut s = self.state.write();
+                s.add_log(format!("Unknown command: '{}'. Use t/r/p/s/c/q", cmd));
+            }
         }
     }
 
@@ -179,35 +338,141 @@ impl TuiApp {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Title
-                Constraint::Length(8),  // Status
-                Constraint::Length(10), // Console/Hardware
-                Constraint::Min(10),    // Log
-                Constraint::Length(3),  // Help hint
+                Constraint::Length(6),  // Prescription
+                Constraint::Length(10), // Data Entry Form
+                Constraint::Length(7),  // System Status
+                Constraint::Length(6),  // Hardware State
+                Constraint::Min(5),     // Log
+                Constraint::Length(2),  // Help hint
             ])
             .split(f.area());
 
         // Title
         self.render_title(f, chunks[0]);
 
-        // Status
-        self.render_status(f, chunks[1], &state);
+        // Prescription (reference parameters)
+        self.render_prescription(f, chunks[1], &state);
 
-        // Console and Hardware MEOS
-        self.render_meos(f, chunks[2], &state);
+        // Data Entry Form
+        self.render_data_entry(f, chunks[2], &state);
+
+        // System Status
+        self.render_status(f, chunks[3], &state);
+
+        // Hardware State
+        self.render_hardware(f, chunks[4], &state);
 
         // Log
-        self.render_log(f, chunks[3], &state);
+        self.render_log(f, chunks[5], &state);
 
         // Help hint
-        self.render_help_hint(f, chunks[4]);
+        self.render_help_hint(f, chunks[6]);
     }
 
     fn render_title(&self, f: &mut Frame, area: Rect) {
-        let title = Paragraph::new("THERAC-25 RADIATION THERAPY SIMULATOR")
+        let title = Paragraph::new("THERAC-25 RADIATION THERAPY SYSTEM")
             .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).border_type(BorderType::Double));
         f.render_widget(title, area);
+    }
+
+    fn render_prescription(&self, f: &mut Frame, area: Rect, state: &TheracState) {
+        let text = vec![
+            Line::from(vec![
+                Span::styled("PRESCRIPTION: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(format!("{} @ {} - {} cGy",
+                    state.reference_meos.beam_type,
+                    state.reference_meos.beam_energy,
+                    state.reference_dose_target)),
+            ]),
+            Line::from(Span::styled(
+                "Press ENTER on any field to copy from prescription",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+            )),
+        ];
+
+        let block = Paragraph::new(text)
+            .block(Block::default()
+                .title("Treatment Plan")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)));
+        f.render_widget(block, area);
+    }
+
+    fn render_data_entry(&self, f: &mut Frame, area: Rect, _state: &TheracState) {
+        let mode_style = if self.current_field == InputField::Mode {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let energy_style = if self.current_field == InputField::Energy {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let dose_style = if self.current_field == InputField::Dose {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let command_style = if self.current_field == InputField::Command {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let text = vec![
+            Line::from(vec![
+                Span::raw("Mode (X=X-ray, E=Electron): "),
+                Span::styled(&self.mode_input, mode_style),
+                if self.current_field == InputField::Mode {
+                    Span::styled("█", mode_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Energy (5/10/15/20/25 MeV): "),
+                Span::styled(&self.energy_input, energy_style),
+                if self.current_field == InputField::Energy {
+                    Span::styled("█", energy_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Dose (cGy):                 "),
+                Span::styled(&self.dose_input, dose_style),
+                if self.current_field == InputField::Dose {
+                    Span::styled("█", dose_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Command:                    "),
+                Span::styled(&self.command_input, command_style),
+                if self.current_field == InputField::Command {
+                    Span::styled("█", command_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+        ];
+
+        let block = Paragraph::new(text)
+            .block(Block::default()
+                .title("Data Entry")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Green)));
+        f.render_widget(block, area);
     }
 
     fn render_status(&self, f: &mut Frame, area: Rect, state: &TheracState) {
@@ -221,19 +486,19 @@ impl TuiApp {
             TPhase::DateTimeIdChanges => Color::Cyan,
         };
 
-        let dose_percent = if state.dose_target > 0.0 {
-            (state.dose_delivered / state.dose_target * 100.0).min(100.0)
-        } else {
-            0.0
-        };
-
         let safety_status = if state.hardware_meos.is_safe() {
             ("SAFE", Color::Green)
         } else {
             ("UNSAFE!", Color::Red)
         };
 
-        let text = vec![
+        let dose_percent = if state.dose_target > 0.0 {
+            (state.dose_delivered / state.dose_target * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+
+        let mut text = vec![
             Line::from(vec![
                 Span::raw("Phase: "),
                 Span::styled(
@@ -245,12 +510,16 @@ impl TuiApp {
                     safety_status.0,
                     Style::default().fg(safety_status.1).add_modifier(Modifier::BOLD)
                 ),
-            ]),
-            Line::from(vec![
-                Span::raw(format!("Malfunctions: {}  |  Class3: {}",
-                    state.malfunction_count, state.class3)),
+                Span::raw(format!("  |  Malfunctions: {}", state.malfunction_count)),
             ]),
         ];
+
+        if let Some(ref malfunction) = state.last_malfunction {
+            text.push(Line::from(Span::styled(
+                malfunction.as_str(),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+            )));
+        }
 
         let status = Paragraph::new(text)
             .block(Block::default().title("System Status").borders(Borders::ALL));
@@ -275,61 +544,18 @@ impl TuiApp {
             .label(format!("{:.1}/{:.1} cGy ({:.1}%)",
                 state.dose_delivered, state.dose_target, dose_percent));
         f.render_widget(gauge, gauge_area);
-
-        // Last malfunction
-        if let Some(ref malfunction) = state.last_malfunction {
-            let malfunction_area = Rect {
-                x: area.x + 2,
-                y: area.y + 5,
-                width: area.width - 4,
-                height: 1,
-            };
-            let mal_text = Paragraph::new(malfunction.as_str())
-                .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
-            f.render_widget(mal_text, malfunction_area);
-        }
     }
 
-    fn render_meos(&self, f: &mut Frame, area: Rect, state: &TheracState) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area);
-
-        // Console MEOS
-        let console_text = vec![
-            Line::from(format!("Beam Type: {}", state.console_meos.beam_type)),
-            Line::from(format!("Energy: {}", state.console_meos.beam_energy)),
-            Line::from(format!("Collimator: {}", state.console_meos.collimator)),
-            Line::from(""),
-            Line::from(vec![
-                Span::raw("Safe: "),
-                Span::styled(
-                    if state.console_meos.is_safe() { "YES" } else { "NO" },
-                    Style::default().fg(
-                        if state.console_meos.is_safe() { Color::Green } else { Color::Red }
-                    ).add_modifier(Modifier::BOLD)
-                ),
-            ]),
-        ];
-
-        let console_block = Paragraph::new(console_text)
-            .block(Block::default()
-                .title("Console Parameters (Operator Input)")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)));
-        f.render_widget(console_block, chunks[0]);
-
-        // Hardware MEOS
+    fn render_hardware(&self, f: &mut Frame, area: Rect, state: &TheracState) {
         let hardware_text = vec![
-            Line::from(format!("Beam Type: {}", state.hardware_meos.beam_type)),
-            Line::from(format!("Energy: {}", state.hardware_meos.beam_energy)),
-            Line::from(format!("Collimator: {}", state.hardware_meos.collimator)),
-            Line::from(""),
+            Line::from(format!("Type: {}  |  Energy: {}  |  Collimator: {}",
+                state.hardware_meos.beam_type,
+                state.hardware_meos.beam_energy,
+                state.hardware_meos.collimator)),
             Line::from(vec![
-                Span::raw("Safe: "),
+                Span::raw("Configuration: "),
                 Span::styled(
-                    if state.hardware_meos.is_safe() { "YES" } else { "NO" },
+                    if state.hardware_meos.is_safe() { "SAFE" } else { "UNSAFE!" },
                     Style::default().fg(
                         if state.hardware_meos.is_safe() { Color::Green } else { Color::Red }
                     ).add_modifier(Modifier::BOLD)
@@ -339,10 +565,10 @@ impl TuiApp {
 
         let hardware_block = Paragraph::new(hardware_text)
             .block(Block::default()
-                .title("Hardware State (Actual)")
+                .title("Hardware State")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Cyan)));
-        f.render_widget(hardware_block, chunks[1]);
+        f.render_widget(hardware_block, area);
     }
 
     fn render_log(&self, f: &mut Frame, area: Rect, state: &TheracState) {
@@ -369,10 +595,9 @@ impl TuiApp {
     }
 
     fn render_help_hint(&self, f: &mut Frame, area: Rect) {
-        let help_text = Paragraph::new("Press ? or F1 for help  |  Q or ESC to quit")
+        let help_text = Paragraph::new("Commands: (t)reat | (r)eset | (p)roceed | (s)top | (c)ontinue | (q)uit  |  F1=Help")
             .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
+            .alignment(Alignment::Center);
         f.render_widget(help_text, area);
     }
 
@@ -380,36 +605,33 @@ impl TuiApp {
         let help_text = vec![
             Line::from(Span::styled("THERAC-25 SIMULATOR - HELP", Style::default().add_modifier(Modifier::BOLD))),
             Line::from(""),
-            Line::from("BASIC CONTROLS:"),
-            Line::from("  q, ESC       - Quit simulator"),
-            Line::from("  ?, F1        - Show this help"),
-            Line::from("  r            - Reset system"),
+            Line::from("DATA ENTRY WORKFLOW:"),
+            Line::from("  1. Enter Mode: X (X-ray) or E (Electron)"),
+            Line::from("     - X-ray automatically sets energy to 25 MeV"),
+            Line::from("  2. Enter Energy: 5, 10, 15, 20, or 25 (MeV)"),
+            Line::from("  3. Enter Dose: target dose in cGy"),
+            Line::from("  4. Enter Command at prompt"),
             Line::from(""),
-            Line::from("DATA ENTRY MODE:"),
-            Line::from("  1            - Set beam type to X-Ray"),
-            Line::from("  2            - Set beam type to Electron"),
-            Line::from("  5            - Set energy to 5 MeV"),
-            Line::from("  6            - Set energy to 10 MeV"),
-            Line::from("  7            - Set energy to 15 MeV"),
-            Line::from("  8            - Set energy to 20 MeV"),
-            Line::from("  9            - Set energy to 25 MeV"),
-            Line::from("  t            - Toggle collimator position (manual override)"),
-            Line::from("  d            - Complete data entry"),
+            Line::from("COPYING PRESCRIPTION VALUES:"),
+            Line::from("  - Press ENTER on any field to copy from prescription"),
+            Line::from("  - This simulates the quick-entry workflow"),
             Line::from(""),
-            Line::from("TREATMENT CONTROLS:"),
-            Line::from("  s            - Start treatment"),
-            Line::from("  p            - Pause treatment"),
-            Line::from("  c            - Continue/resume treatment"),
+            Line::from("COMMANDS:"),
+            Line::from("  t, treat    - Complete entry and start treatment"),
+            Line::from("  r, reset    - Reset system and generate new prescription"),
+            Line::from("  p, proceed  - Complete data entry (for setup)"),
+            Line::from("  s, stop     - Pause current treatment"),
+            Line::from("  c, continue - Resume paused treatment"),
+            Line::from("  q, quit     - Exit simulator"),
             Line::from(""),
-            Line::from("RANDOM GENERATION:"),
-            Line::from("  g            - Generate random safe parameters"),
-            Line::from(Span::styled("  b            - Generate bug-triggering parameters (race condition!)",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("THE RACE CONDITION:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Line::from("The original Therac-25 bug occurred when operators:"),
+            Line::from("  1. Entered X-ray mode (auto-sets high energy)"),
+            Line::from("  2. Noticed mistake, quickly changed to Electron"),
+            Line::from("  3. Started treatment before hardware sync completed"),
+            Line::from("  4. Result: High-energy beam without flatness filter = 100x overdose"),
             Line::from(""),
-            Line::from(Span::styled("EDUCATIONAL NOTE:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-            Line::from("This simulator intentionally contains the race conditions that caused"),
-            Line::from("real-world patient deaths. Use 'b' to quickly change parameters and"),
-            Line::from("trigger the bug where hardware state doesn't match console settings."),
+            Line::from("Try changing mode quickly after entering X-ray to trigger the bug!"),
             Line::from(""),
             Line::from("Press any key to close help..."),
         ];
@@ -421,7 +643,7 @@ impl TuiApp {
                 .border_type(BorderType::Double))
             .style(Style::default().bg(Color::Black));
 
-        let area = centered_rect(80, 90, f.area());
+        let area = centered_rect(85, 90, f.area());
         f.render_widget(Block::default().style(Style::default().bg(Color::Black)), f.area());
         f.render_widget(help_block, area);
     }
