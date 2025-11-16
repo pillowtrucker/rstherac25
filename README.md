@@ -90,32 +90,47 @@ The TUI simulates the actual Therac-25 operator terminal with form-based data en
 **Data Entry Workflow:**
 
 1. **Mode Entry:** Type `X` for X-ray or `E` for Electron
-   - X-ray mode automatically sets energy to 25 MeV (as per the real Therac-25)
+   - X-ray mode automatically sets energy to 25 MeV and skips to Gantry entry (as per the real Therac-25)
    - Electron mode moves you to energy entry
 
 2. **Energy Entry:** Type energy value (5, 10, 15, 20, or 25)
    - Press ENTER without typing to copy from prescription
+   - Press ENTER after typing to proceed to gantry angle
+
+3. **Gantry Angle Entry:** Type gantry angle (0-360 degrees)
+   - Press ENTER without typing to copy from prescription
+   - Press ENTER after typing to proceed to field size
+
+4. **Field Size Entry:** Type X dimension, press `x`, type Y dimension
+   - Example: Type `10` then `x` then `15` for a 10×15 cm field
+   - Press ENTER without typing to copy from prescription (e.g., `10x15` copied automatically)
    - Press ENTER after typing to proceed to dose
 
-3. **Dose Entry:** Type target dose in cGy
+5. **Dose Entry:** Type target dose in cGy (centigray)
    - Press ENTER without typing to copy from prescription
    - Press ENTER after typing to proceed to command prompt
 
-4. **Command Prompt:** Type a command and press ENTER
-   - `t` or `treat` - Start treatment
+6. **Command Prompt:** Type a command and press ENTER
+   - `t` or `treat` - Start treatment immediately
    - `r` or `reset` - Reset system and generate new prescription
-   - `p` or `proceed` - Complete data entry (setup mode)
+   - `p` or `proceed` - Complete data entry and move to setup phase
    - `s` or `stop` - Pause active treatment
    - `c` or `continue` - Resume paused treatment
    - `q` or `quit` - Exit simulator
    - Press ESC to return to Mode entry
 
 **Quick Entry Feature:**
-- Press ENTER on any field without typing to copy the prescription value
+- Press ENTER on any numeric field without typing to copy the prescription value
 - This simulates the real operator workflow that led to the race condition
+- Quick entry was convenient but dangerous when operators made mistakes!
+
+**Field Navigation:**
+- Press ENTER to advance to the next field
+- Press ESC at any time to return to Mode entry
+- Press Backspace to delete characters
 
 **Global Commands:**
-- `F1` - Show help screen
+- `F1` - Show help screen with detailed instructions
 - `Ctrl+C` - Emergency quit
 
 ### WebAssembly Version
@@ -150,17 +165,22 @@ The Therac-25 race condition typically occurred when operators:
 This simulates the exact workflow that caused real deaths:
 
 1. **Start the simulator** - `cargo run --release`
-2. **Enter X-ray mode** - Type `X` (energy auto-sets to 25 MeV)
-3. **"Oops, wrong mode!"** - Press Backspace to clear
+2. **Enter X-ray mode** - Type `X` (energy auto-sets to 25 MeV, skips to Gantry)
+3. **"Oops, wrong mode!"** - Press ESC to return to Mode entry
 4. **Quickly change to Electron** - Type `E`
 5. **Enter energy** - Type `15` and press ENTER
-6. **Enter dose** - Press ENTER to copy prescription (or type a value)
-7. **Start treatment immediately** - Type `t` and press ENTER
-8. **Watch what happens** - The hardware may still be syncing from X-ray mode
+6. **Enter gantry** - Press ENTER to copy from prescription
+7. **Enter field size** - Press ENTER to copy from prescription
+8. **Enter dose** - Press ENTER to copy from prescription
+9. **Start treatment immediately** - Type `t` and press ENTER
+10. **Watch what happens** - The hardware may still be syncing from X-ray mode
 
 The race window is small but real. If you start treatment while the hardware is still moving the collimator, you'll either get:
 - **MALFUNCTION 54** if the mismatch is detected
 - **CRITICAL SAFETY VIOLATION** if the beam fires during the sync
+
+**Alternative Quick Trigger:**
+After entering X-ray mode, quickly press ESC, type `E`, then rapidly press ENTER through all fields (copying prescription values), and type `t` to treat. This rapid-fire data entry before hardware sync completes is what caused real accidents.
 
 ### Method 2: Prescription Workflow
 

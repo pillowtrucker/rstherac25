@@ -191,6 +191,90 @@ impl WasmTherac25 {
         state.add_log(format!("Dose target set to {:.1} cGy", target));
     }
 
+    /// Set gantry angle (0-360 degrees)
+    #[wasm_bindgen(js_name = setGantryAngle)]
+    pub fn set_gantry_angle(&mut self, angle: u16) {
+        let mut state = self.state.write();
+        if state.phase == TPhase::DataEntry {
+            state.console_params.gantry_angle = angle.min(360);
+            state.add_log(format!("Gantry angle set to {}°", state.console_params.gantry_angle));
+        }
+    }
+
+    /// Set field size X dimension (cm)
+    #[wasm_bindgen(js_name = setFieldSizeX)]
+    pub fn set_field_size_x(&mut self, size: f32) {
+        let mut state = self.state.write();
+        if state.phase == TPhase::DataEntry {
+            state.console_params.field_size_x = size.max(0.0).min(40.0);
+            state.add_log(format!("Field size X set to {:.1} cm", state.console_params.field_size_x));
+        }
+    }
+
+    /// Set field size Y dimension (cm)
+    #[wasm_bindgen(js_name = setFieldSizeY)]
+    pub fn set_field_size_y(&mut self, size: f32) {
+        let mut state = self.state.write();
+        if state.phase == TPhase::DataEntry {
+            state.console_params.field_size_y = size.max(0.0).min(40.0);
+            state.add_log(format!("Field size Y set to {:.1} cm", state.console_params.field_size_y));
+        }
+    }
+
+    /// Set dose rate (cGy/min)
+    #[wasm_bindgen(js_name = setDoseRate)]
+    pub fn set_dose_rate(&mut self, rate: f32) {
+        let mut state = self.state.write();
+        if state.phase == TPhase::DataEntry {
+            state.console_params.dose_rate = rate.max(0.0);
+            state.add_log(format!("Dose rate set to {:.0} cGy/min", state.console_params.dose_rate));
+        }
+    }
+
+    /// Get gantry angle
+    #[wasm_bindgen(js_name = getGantryAngle)]
+    pub fn get_gantry_angle(&self) -> u16 {
+        let state = self.state.read();
+        state.console_params.gantry_angle
+    }
+
+    /// Get field size X
+    #[wasm_bindgen(js_name = getFieldSizeX)]
+    pub fn get_field_size_x(&self) -> f32 {
+        let state = self.state.read();
+        state.console_params.field_size_x
+    }
+
+    /// Get field size Y
+    #[wasm_bindgen(js_name = getFieldSizeY)]
+    pub fn get_field_size_y(&self) -> f32 {
+        let state = self.state.read();
+        state.console_params.field_size_y
+    }
+
+    /// Get dose rate
+    #[wasm_bindgen(js_name = getDoseRate)]
+    pub fn get_dose_rate(&self) -> f32 {
+        let state = self.state.read();
+        state.console_params.dose_rate
+    }
+
+    /// Get reference (prescription) parameters as JSON
+    #[wasm_bindgen(js_name = getReferenceParams)]
+    pub fn get_reference_params(&self) -> JsValue {
+        let state = self.state.read();
+        let params = serde_json::json!({
+            "beam_type": format!("{}", state.reference_meos.beam_type),
+            "beam_energy": format!("{}", state.reference_meos.beam_energy),
+            "gantry_angle": state.reference_params.gantry_angle,
+            "field_size_x": state.reference_params.field_size_x,
+            "field_size_y": state.reference_params.field_size_y,
+            "dose_rate": state.reference_params.dose_rate,
+            "dose_target": state.reference_dose_target,
+        });
+        serde_wasm_bindgen::to_value(&params).unwrap_or(JsValue::NULL)
+    }
+
     /// Get malfunction count
     #[wasm_bindgen(js_name = getMalfunctionCount)]
     pub fn get_malfunction_count(&self) -> u32 {

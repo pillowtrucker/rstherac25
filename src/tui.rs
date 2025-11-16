@@ -258,18 +258,22 @@ impl TuiApp {
 
     fn handle_field_size_input(&mut self, key: KeyCode) {
         match key {
-            KeyCode::Char(c) if c.is_ascii_digit() || c == '.' || c == 'x' || c == 'X' => {
-                if c == 'x' || c == 'X' {
-                    if !self.field_x_input.is_empty() && self.field_y_input.is_empty() {
-                        // User typing 'x' separator
-                        // field_x is done, now entering field_y
-                        return;
-                    }
-                }
-                if self.field_y_input.is_empty() {
+            KeyCode::Char(c) if c.is_ascii_digit() || c == '.' => {
+                // Only allow digits and decimal point
+                if self.field_y_input.is_empty() && !self.field_x_input.contains('x') {
+                    // Still entering X dimension
                     self.field_x_input.push(c);
                 } else {
+                    // Entering Y dimension
                     self.field_y_input.push(c);
+                }
+            }
+            KeyCode::Char('x') | KeyCode::Char('X') => {
+                // 'x' acts as separator between X and Y dimensions
+                if !self.field_x_input.is_empty() && self.field_y_input.is_empty() {
+                    // Transition from X to Y dimension
+                    // Don't store the 'x', just use it as a signal
+                    // The display will show it between the values
                 }
             }
             KeyCode::Backspace => {
@@ -288,13 +292,21 @@ impl TuiApp {
                 }
 
                 // Parse and set field sizes
+                // If only X dimension is entered, use it for both X and Y (square field)
                 if let Ok(size_x) = self.field_x_input.parse::<f32>() {
-                    if let Ok(size_y) = self.field_y_input.parse::<f32>() {
-                        let mut s = self.state.write();
-                        s.console_params.field_size_x = size_x.min(40.0);
-                        s.console_params.field_size_y = size_y.min(40.0);
-                        s.editing_taking_place = true;
-                    }
+                    let size_y = if self.field_y_input.is_empty() {
+                        size_x // Square field if Y not specified
+                    } else {
+                        self.field_y_input.parse::<f32>().unwrap_or(size_x)
+                    };
+
+                    let mut s = self.state.write();
+                    s.console_params.field_size_x = size_x.max(1.0).min(40.0);
+                    s.console_params.field_size_y = size_y.max(1.0).min(40.0);
+                    s.editing_taking_place = true;
+                    let field_x = s.console_params.field_size_x;
+                    let field_y = s.console_params.field_size_y;
+                    s.add_log(format!("Field size set to {}×{} cm", field_x, field_y));
                 }
                 // Move to dose field
                 self.current_field = InputField::Dose;
@@ -432,10 +444,10 @@ impl TuiApp {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),  // Title
-                Constraint::Length(6),  // Prescription
-                Constraint::Length(10), // Data Entry Form
-                Constraint::Length(7),  // System Status
-                Constraint::Length(6),  // Hardware State
+                Constraint::Length(8),  // Prescription (increased for more params)
+                Constraint::Length(16), // Data Entry Form (increased for all fields)
+                Constraint::Length(8),  // System Status (increased for more info)
+                Constraint::Length(8),  // Hardware State (increased for treatment params)
                 Constraint::Min(5),     // Log
                 Constraint::Length(2),  // Help hint
             ])
@@ -475,13 +487,21 @@ impl TuiApp {
         let text = vec![
             Line::from(vec![
                 Span::styled("PRESCRIPTION: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw(format!("{} @ {} - {} cGy",
+                Span::raw(format!("{} @ {}",
                     state.reference_meos.beam_type,
-                    state.reference_meos.beam_energy,
-                    state.reference_dose_target)),
+                    state.reference_meos.beam_energy)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Parameters: ", Style::default().fg(Color::Yellow)),
+                Span::raw(format!("Gantry {}° | Field {}×{} cm | {} cGy @ {:.0} cGy/min",
+                    state.reference_params.gantry_angle,
+                    state.reference_params.field_size_x,
+                    state.reference_params.field_size_y,
+                    state.reference_dose_target,
+                    state.reference_params.dose_rate)),
             ]),
             Line::from(Span::styled(
-                "Press ENTER on any field to copy from prescription",
+                "Press ENTER on numeric fields to copy from prescription",
                 Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
             )),
         ];
@@ -507,6 +527,18 @@ impl TuiApp {
             Style::default().fg(Color::White)
         };
 
+        let gantry_style = if self.current_field == InputField::Gantry {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let field_style = if self.current_field == InputField::FieldSize {
+            Style::default().fg(Color::Black).bg(Color::Green)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
         let dose_style = if self.current_field == InputField::Dose {
             Style::default().fg(Color::Black).bg(Color::Green)
         } else {
@@ -517,6 +549,14 @@ impl TuiApp {
             Style::default().fg(Color::Black).bg(Color::Cyan)
         } else {
             Style::default().fg(Color::White)
+        };
+
+        let field_display = if self.field_x_input.is_empty() && self.field_y_input.is_empty() {
+            String::new()
+        } else if self.field_y_input.is_empty() {
+            format!("{}×", self.field_x_input)
+        } else {
+            format!("{}×{}", self.field_x_input, self.field_y_input)
         };
 
         let text = vec![
@@ -535,6 +575,26 @@ impl TuiApp {
                 Span::styled(&self.energy_input, energy_style),
                 if self.current_field == InputField::Energy {
                     Span::styled("█", energy_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Gantry Angle (0-360 deg):   "),
+                Span::styled(&self.gantry_input, gantry_style),
+                if self.current_field == InputField::Gantry {
+                    Span::styled("█", gantry_style)
+                } else {
+                    Span::raw("")
+                },
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Field Size (X×Y cm):        "),
+                Span::styled(&field_display, field_style),
+                if self.current_field == InputField::FieldSize {
+                    Span::styled("█", field_style)
                 } else {
                     Span::raw("")
                 },
@@ -606,6 +666,16 @@ impl TuiApp {
                 ),
                 Span::raw(format!("  |  Malfunctions: {}", state.malfunction_count)),
             ]),
+            Line::from(vec![
+                Span::styled("Console: ", Style::default().fg(Color::Cyan)),
+                Span::raw(format!("{} @ {}  |  Gantry {}°  |  Field {}×{} cm  |  {} cGy",
+                    state.console_meos.beam_type,
+                    state.console_meos.beam_energy,
+                    state.console_params.gantry_angle,
+                    state.console_params.field_size_x,
+                    state.console_params.field_size_y,
+                    state.dose_target)),
+            ]),
         ];
 
         if let Some(ref malfunction) = state.last_malfunction {
@@ -622,7 +692,7 @@ impl TuiApp {
         // Dose gauge
         let gauge_area = Rect {
             x: area.x + 2,
-            y: area.y + 3,
+            y: area.y + 4,
             width: area.width - 4,
             height: 2,
         };
@@ -646,6 +716,11 @@ impl TuiApp {
                 state.hardware_meos.beam_type,
                 state.hardware_meos.beam_energy,
                 state.hardware_meos.collimator)),
+            Line::from(format!("Gantry: {}°  |  Field: {}×{} cm  |  Dose Rate: {:.0} cGy/min",
+                state.hardware_params.gantry_angle,
+                state.hardware_params.field_size_x,
+                state.hardware_params.field_size_y,
+                state.hardware_params.dose_rate)),
             Line::from(vec![
                 Span::raw("Configuration: "),
                 Span::styled(
@@ -654,6 +729,11 @@ impl TuiApp {
                         if state.hardware_meos.is_safe() { Color::Green } else { Color::Red }
                     ).add_modifier(Modifier::BOLD)
                 ),
+                if state.editing_taking_place {
+                    Span::styled("  |  EDITING", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                } else {
+                    Span::raw("")
+                },
             ]),
         ];
 
@@ -701,31 +781,44 @@ impl TuiApp {
             Line::from(""),
             Line::from("DATA ENTRY WORKFLOW:"),
             Line::from("  1. Enter Mode: X (X-ray) or E (Electron)"),
-            Line::from("     - X-ray automatically sets energy to 25 MeV"),
+            Line::from("     - X-ray automatically sets energy to 25 MeV and skips to Gantry"),
             Line::from("  2. Enter Energy: 5, 10, 15, 20, or 25 (MeV)"),
-            Line::from("  3. Enter Dose: target dose in cGy"),
-            Line::from("  4. Enter Command at prompt"),
+            Line::from("  3. Enter Gantry Angle: 0-360 degrees"),
+            Line::from("  4. Enter Field Size: Type X value, press 'x', type Y value"),
+            Line::from("     - Example: 10x15 for 10cm × 15cm field"),
+            Line::from("  5. Enter Dose: target dose in cGy (centigray)"),
+            Line::from("  6. Enter Command at prompt"),
             Line::from(""),
             Line::from("COPYING PRESCRIPTION VALUES:"),
-            Line::from("  - Press ENTER on any field to copy from prescription"),
-            Line::from("  - This simulates the quick-entry workflow"),
+            Line::from("  - Press ENTER on any numeric field to copy from prescription"),
+            Line::from("  - This simulates the quick-entry workflow that led to real accidents"),
+            Line::from("  - Quick entry was convenient but dangerous!"),
+            Line::from(""),
+            Line::from("FIELD NAVIGATION:"),
+            Line::from("  - Press ENTER to advance to next field"),
+            Line::from("  - Press ESC to return to Mode entry"),
+            Line::from("  - Backspace to delete characters"),
             Line::from(""),
             Line::from("COMMANDS:"),
-            Line::from("  t, treat    - Complete entry and start treatment"),
+            Line::from("  t, treat    - Complete entry and start treatment immediately"),
             Line::from("  r, reset    - Reset system and generate new prescription"),
-            Line::from("  p, proceed  - Complete data entry (for setup)"),
+            Line::from("  p, proceed  - Complete data entry and move to setup phase"),
             Line::from("  s, stop     - Pause current treatment"),
             Line::from("  c, continue - Resume paused treatment"),
             Line::from("  q, quit     - Exit simulator"),
             Line::from(""),
             Line::from(Span::styled("THE RACE CONDITION:", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
             Line::from("The original Therac-25 bug occurred when operators:"),
-            Line::from("  1. Entered X-ray mode (auto-sets high energy)"),
-            Line::from("  2. Noticed mistake, quickly changed to Electron"),
-            Line::from("  3. Started treatment before hardware sync completed"),
+            Line::from("  1. Entered X-ray mode (auto-sets to 25 MeV high energy)"),
+            Line::from("  2. Noticed mistake, quickly changed to Electron mode"),
+            Line::from("  3. Started treatment before hardware collimator sync completed"),
             Line::from("  4. Result: High-energy beam without flatness filter = 100x overdose"),
             Line::from(""),
-            Line::from("Try changing mode quickly after entering X-ray to trigger the bug!"),
+            Line::from("TO TRIGGER THE BUG:"),
+            Line::from("  - Type X (X-ray mode), then immediately press Backspace"),
+            Line::from("  - Type E (Electron mode), fill in parameters quickly"),
+            Line::from("  - Use 't' command to treat before hardware finishes syncing"),
+            Line::from("  - Watch for MALFUNCTION 54 or CRITICAL SAFETY VIOLATION!"),
             Line::from(""),
             Line::from("Press any key to close help..."),
         ];
@@ -737,7 +830,7 @@ impl TuiApp {
                 .border_type(BorderType::Double))
             .style(Style::default().bg(Color::Black));
 
-        let area = centered_rect(85, 90, f.area());
+        let area = centered_rect(85, 95, f.area());
         f.render_widget(Block::default().style(Style::default().bg(Color::Black)), f.area());
         f.render_widget(help_block, area);
     }
