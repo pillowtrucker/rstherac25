@@ -25,6 +25,8 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 pub mod simulator;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 
 #[cfg(feature = "wasm")]

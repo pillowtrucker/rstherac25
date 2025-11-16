@@ -7,8 +7,22 @@
 
 use crate::*;
 use std::time::Duration;
-use tokio::time::sleep;
 use rand::Rng;
+
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::time::sleep;
+
+#[cfg(target_arch = "wasm32")]
+async fn sleep(duration: Duration) {
+    let millis = duration.as_millis() as i32;
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        web_sys::window()
+            .unwrap()
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, millis)
+            .unwrap();
+    });
+    wasm_bindgen_futures::JsFuture::from(promise).await.unwrap();
+}
 
 /// Treatment monitor task
 /// Manages the treatment state machine, cycling through phases

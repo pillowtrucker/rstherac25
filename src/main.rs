@@ -6,6 +6,8 @@
 //!
 //! WARNING: This simulator intentionally contains dangerous bugs for educational purposes.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use rstherac25::*;
 use rstherac25::simulator::*;
 use rstherac25::tui::TuiApp;

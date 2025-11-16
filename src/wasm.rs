@@ -73,7 +73,8 @@ impl WasmTherac25 {
                 1 => BeamType::Electron,
                 _ => BeamType::Undefined,
             };
-            state.add_log(format!("Beam type set to {}", state.console_meos.beam_type));
+            let beam_type_val = state.console_meos.beam_type;
+            state.add_log(format!("Beam type set to {}", beam_type_val));
         }
     }
 
@@ -89,7 +90,8 @@ impl WasmTherac25 {
                 3 => BeamEnergy::E20,
                 _ => BeamEnergy::E25,
             };
-            state.add_log(format!("Beam energy set to {}", state.console_meos.beam_energy));
+            let beam_energy_val = state.console_meos.beam_energy;
+            state.add_log(format!("Beam energy set to {}", beam_energy_val));
         }
     }
 
@@ -102,7 +104,8 @@ impl WasmTherac25 {
             CollimatorPosition::OutOfPosition => CollimatorPosition::InPosition,
             CollimatorPosition::Transitioning => CollimatorPosition::InPosition,
         };
-        state.add_log(format!("Collimator set to {}", state.console_meos.collimator));
+        let collimator_val = state.console_meos.collimator;
+        state.add_log(format!("Collimator set to {}", collimator_val));
     }
 
     /// Complete data entry
@@ -197,7 +200,8 @@ impl WasmTherac25 {
         let mut state = self.state.write();
         if state.phase == TPhase::DataEntry {
             state.console_params.gantry_angle = angle.min(360);
-            state.add_log(format!("Gantry angle set to {}°", state.console_params.gantry_angle));
+            let angle_val = state.console_params.gantry_angle;
+            state.add_log(format!("Gantry angle set to {}°", angle_val));
         }
     }
 
@@ -207,7 +211,8 @@ impl WasmTherac25 {
         let mut state = self.state.write();
         if state.phase == TPhase::DataEntry {
             state.console_params.field_size_x = size.max(0.0).min(40.0);
-            state.add_log(format!("Field size X set to {:.1} cm", state.console_params.field_size_x));
+            let size_val = state.console_params.field_size_x;
+            state.add_log(format!("Field size X set to {:.1} cm", size_val));
         }
     }
 
@@ -217,7 +222,8 @@ impl WasmTherac25 {
         let mut state = self.state.write();
         if state.phase == TPhase::DataEntry {
             state.console_params.field_size_y = size.max(0.0).min(40.0);
-            state.add_log(format!("Field size Y set to {:.1} cm", state.console_params.field_size_y));
+            let size_val = state.console_params.field_size_y;
+            state.add_log(format!("Field size Y set to {:.1} cm", size_val));
         }
     }
 
@@ -227,7 +233,8 @@ impl WasmTherac25 {
         let mut state = self.state.write();
         if state.phase == TPhase::DataEntry {
             state.console_params.dose_rate = rate.max(0.0);
-            state.add_log(format!("Dose rate set to {:.0} cGy/min", state.console_params.dose_rate));
+            let rate_val = state.console_params.dose_rate;
+            state.add_log(format!("Dose rate set to {:.0} cGy/min", rate_val));
         }
     }
 
