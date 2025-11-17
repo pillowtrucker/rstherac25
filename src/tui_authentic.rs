@@ -73,9 +73,11 @@ impl AuthenticTuiApp {
         {
             let mut s = state.write();
             s.generate_new_reference();
-            // Initialize hardware to match the reference prescription
+            // Initialize hardware and console to match the reference prescription
             s.hardware_meos = s.reference_meos;
             s.hardware_params = s.reference_params;
+            s.console_meos = s.reference_meos;
+            s.console_params = s.reference_params;
         }
 
         Self {
@@ -371,9 +373,11 @@ impl AuthenticTuiApp {
                 let mut s = self.state.write();
                 s.reset();
                 s.generate_new_reference();
-                // Sync hardware to match the new reference prescription
+                // Sync hardware and console to match the new reference prescription
                 s.hardware_meos = s.reference_meos;
                 s.hardware_params = s.reference_params;
+                s.console_meos = s.reference_meos;
+                s.console_params = s.reference_params;
                 drop(s);
                 self.clear_all_inputs();
                 self.command_input.clear();
