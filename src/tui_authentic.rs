@@ -69,13 +69,12 @@ pub struct AuthenticTuiApp {
 
 impl AuthenticTuiApp {
     pub fn new(state: SharedTheracState) -> Self {
-        // Initialize with a random prescription and sync hardware to match
+        // Initialize with a random prescription
         {
             let mut s = state.write();
             s.generate_new_reference();
-            // Initialize hardware and console to match the reference prescription
-            s.hardware_meos = s.reference_meos;
-            s.hardware_params = s.reference_params;
+            // Pre-seed console with reference values (for auto-copy convenience)
+            // but leave hardware at defaults - it will sync via housekeeper
             s.console_meos = s.reference_meos;
             s.console_params = s.reference_params;
         }
@@ -373,9 +372,8 @@ impl AuthenticTuiApp {
                 let mut s = self.state.write();
                 s.reset();
                 s.generate_new_reference();
-                // Sync hardware and console to match the new reference prescription
-                s.hardware_meos = s.reference_meos;
-                s.hardware_params = s.reference_params;
+                // Pre-seed console with new reference (for auto-copy convenience)
+                // Hardware will sync via housekeeper naturally
                 s.console_meos = s.reference_meos;
                 s.console_params = s.reference_params;
                 drop(s);
