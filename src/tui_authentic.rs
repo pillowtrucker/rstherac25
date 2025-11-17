@@ -69,6 +69,9 @@ pub struct AuthenticTuiApp {
 
 impl AuthenticTuiApp {
     pub fn new(state: SharedTheracState) -> Self {
+        // Initialize with a random prescription
+        state.write().generate_new_reference();
+
         Self {
             state,
             current_field: InputField::PatientName,
@@ -208,10 +211,94 @@ impl AuthenticTuiApp {
                 }
                 self.next_field();
             }
+            InputField::Energy => {
+                // Auto-copy if empty
+                if self.energy_input.is_empty() {
+                    let s = self.state.read();
+                    let energy_mev = match s.reference_meos.beam_energy {
+                        BeamEnergy::E5 => 5,
+                        BeamEnergy::E10 => 10,
+                        BeamEnergy::E15 => 15,
+                        BeamEnergy::E20 => 20,
+                        BeamEnergy::E25 => 25,
+                    };
+                    self.energy_input = (energy_mev * 1000).to_string();
+                }
+                self.next_field();
+            }
+            InputField::UnitRate => {
+                // Auto-copy if empty
+                if self.unit_rate_input.is_empty() {
+                    let s = self.state.read();
+                    self.unit_rate_input = format!("{:.1}", s.reference_params.dose_rate);
+                }
+                self.next_field();
+            }
+            InputField::MonitorUnits => {
+                // Auto-copy if empty (not implemented, skip)
+                self.next_field();
+            }
+            InputField::Time => {
+                // Auto-copy if empty - calculate from dose target and rate
+                if self.time_input.is_empty() {
+                    let s = self.state.read();
+                    if s.reference_params.dose_rate > 0.0 {
+                        let time = s.reference_dose_target / (s.reference_params.dose_rate as f64);
+                        self.time_input = format!("{:.1}", time);
+                    }
+                }
+                self.next_field();
+            }
+            InputField::GantryRot => {
+                // Auto-copy if empty
+                if self.gantry_rot_input.is_empty() {
+                    let s = self.state.read();
+                    self.gantry_rot_input = s.reference_params.gantry_angle.to_string();
+                }
+                self.next_field();
+            }
+            InputField::CollimatorRot => {
+                // Auto-copy if empty
+                if self.collimator_rot_input.is_empty() {
+                    let s = self.state.read();
+                    self.collimator_rot_input = s.reference_params.collimator_angle.to_string();
+                }
+                self.next_field();
+            }
+            InputField::CollimatorX => {
+                // Auto-copy if empty
+                if self.collimator_x_input.is_empty() {
+                    let s = self.state.read();
+                    self.collimator_x_input = format!("{:.1}", s.reference_params.field_size_x);
+                }
+                self.next_field();
+            }
+            InputField::CollimatorY => {
+                // Auto-copy if empty
+                if self.collimator_y_input.is_empty() {
+                    let s = self.state.read();
+                    self.collimator_y_input = format!("{:.1}", s.reference_params.field_size_y);
+                }
+                self.next_field();
+            }
+            InputField::WedgeNum => {
+                // Auto-copy if empty (not implemented, use 0)
+                if self.wedge_num_input.is_empty() {
+                    self.wedge_num_input = "0".to_string();
+                }
+                self.next_field();
+            }
+            InputField::AccessoryNum => {
+                // Auto-copy if empty (not implemented, use 0)
+                if self.accessory_num_input.is_empty() {
+                    self.accessory_num_input = "0".to_string();
+                }
+                self.next_field();
+            }
             InputField::Command => {
                 self.handle_command();
             }
-            _ => {
+            InputField::PatientName => {
                 self.next_field();
             }
         }
@@ -237,8 +324,13 @@ impl AuthenticTuiApp {
 
     fn handle_char(&mut self, c: char) {
         match self.current_field {
-            InputField::PatientName => self.patient_name.push(c),
-            InputField::Mode => self.mode_input.push(c),
+            InputField::PatientName if c.is_alphanumeric() || c.is_whitespace() || c == '-' || c == ',' => {
+                self.patient_name.push(c);
+            }
+            InputField::Mode if (c == 'X' || c == 'x' || c == 'E' || c == 'e') && self.mode_input.is_empty() => {
+                // Only allow X or E, and only one character
+                self.mode_input.push(c.to_ascii_uppercase());
+            }
             InputField::Energy if c.is_ascii_digit() => self.energy_input.push(c),
             InputField::UnitRate if c.is_ascii_digit() || c == '.' => self.unit_rate_input.push(c),
             InputField::MonitorUnits if c.is_ascii_digit() || c == '.' => self.monitor_units_input.push(c),
@@ -249,7 +341,7 @@ impl AuthenticTuiApp {
             InputField::CollimatorY if c.is_ascii_digit() || c == '.' => self.collimator_y_input.push(c),
             InputField::WedgeNum if c.is_ascii_digit() => self.wedge_num_input.push(c),
             InputField::AccessoryNum if c.is_ascii_digit() => self.accessory_num_input.push(c),
-            InputField::Command => self.command_input.push(c),
+            InputField::Command if c.is_alphanumeric() || c.is_whitespace() => self.command_input.push(c),
             _ => {}
         }
     }
@@ -272,6 +364,7 @@ impl AuthenticTuiApp {
             "r" | "reset" => {
                 let mut s = self.state.write();
                 s.reset();
+                s.generate_new_reference();
                 drop(s);
                 self.clear_all_inputs();
                 self.command_input.clear();
@@ -377,17 +470,32 @@ impl AuthenticTuiApp {
         lines.push(Line::from(""));
 
         // Line 3: Mode and Energy
-        let mode_str = if state.console_meos.beam_type == BeamType::XRay { "X-RAY" } else { "ELECTRON" };
+        // Display full mode name based on input
+        let mode_display = if self.mode_input.is_empty() {
+            String::new()
+        } else if self.mode_input == "X" {
+            "X-RAY".to_string()
+        } else if self.mode_input == "E" {
+            "ELECTRON".to_string()
+        } else {
+            self.mode_input.clone()
+        };
+
         lines.push(Line::from(vec![
             Span::raw(format!("{:>LEFT$}Mode: ", "")),
             Span::styled(
-                format!("{:<10}", if self.mode_input.is_empty() { mode_str } else { &self.mode_input }),
+                format!("{:<10}", mode_display),
                 if self.current_field == InputField::Mode {
                     Style::default().fg(Color::Black).bg(Color::Green)
                 } else {
                     Style::default().fg(Color::Green)
                 }
             ),
+            if self.current_field == InputField::Mode {
+                Span::styled(" ◀", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("")
+            },
             Span::raw("    Energy (KeV): "),
             Span::styled(
                 format!("{:<10}", self.energy_input),
@@ -397,6 +505,11 @@ impl AuthenticTuiApp {
                     Style::default().fg(Color::Green)
                 }
             ),
+            if self.current_field == InputField::Energy {
+                Span::styled(" ◀", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("")
+            },
         ]));
 
         // Line 4: Blank
@@ -475,7 +588,7 @@ impl AuthenticTuiApp {
         lines.push(Line::from(vec![
             Span::raw("Command: "),
             Span::styled(
-                &self.command_input,
+                format!("{:<30}", &self.command_input),
                 if self.current_field == InputField::Command {
                     Style::default().fg(Color::Black).bg(Color::Green)
                 } else {
@@ -483,7 +596,7 @@ impl AuthenticTuiApp {
                 }
             ),
             if self.current_field == InputField::Command {
-                Span::styled("█", Style::default().fg(Color::Black).bg(Color::Green))
+                Span::styled(" ◀", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             } else {
                 Span::raw("")
             },
@@ -517,7 +630,7 @@ impl AuthenticTuiApp {
                 }
             ),
             if active {
-                Span::styled("█", Style::default().fg(Color::Black).bg(Color::Green))
+                Span::styled(" ◀", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             } else {
                 Span::raw("")
             },
@@ -538,7 +651,7 @@ impl AuthenticTuiApp {
                 }
             ),
             if active {
-                Span::styled("█", Style::default().fg(Color::Black).bg(Color::Green))
+                Span::styled(" ◀", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             } else {
                 Span::raw("")
             },
