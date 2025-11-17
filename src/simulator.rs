@@ -5,11 +5,14 @@
 //! - Housekeeper: synchronizes hardware collimator position with console settings
 //! - The critical race condition in zap_the_specimen()
 
-use crate::*;
+use crate::state::*;
 use std::time::Duration;
 use rand::Rng;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "standalone")]
+use tokio::task::JoinHandle;
+
+#[cfg(all(feature = "standalone", not(target_arch = "wasm32")))]
 use tokio::time::sleep;
 
 #[cfg(target_arch = "wasm32")]
@@ -22,6 +25,47 @@ async fn sleep(duration: Duration) {
             .unwrap();
     });
     wasm_bindgen_futures::JsFuture::from(promise).await.unwrap();
+}
+
+// Stub sleep for embeddable mode without tokio
+#[cfg(all(not(feature = "standalone"), not(target_arch = "wasm32")))]
+async fn sleep(_duration: Duration) {
+    // No-op for embeddable mode - external integrator provides their own runtime
+}
+
+/// Task handles for background simulator tasks
+#[cfg(feature = "standalone")]
+pub struct TheracTaskHandles {
+    pub treatment_monitor: JoinHandle<()>,
+    pub housekeeper: JoinHandle<()>,
+}
+
+/// Spawn background tasks for the simulator
+/// Call this when entering the Therac-25 screen or starting the simulator
+#[cfg(feature = "standalone")]
+pub fn spawn_treatment_tasks(state: SharedTheracState) -> TheracTaskHandles {
+    let state_clone = state.clone();
+    let treatment_handle = tokio::spawn(async move {
+        treatment_monitor(state_clone).await;
+    });
+
+    let state_clone = state.clone();
+    let housekeeper_handle = tokio::spawn(async move {
+        housekeeper(state_clone).await;
+    });
+
+    TheracTaskHandles {
+        treatment_monitor: treatment_handle,
+        housekeeper: housekeeper_handle,
+    }
+}
+
+/// Cleanup tasks when exiting simulator
+/// Call this when leaving the Therac-25 screen or shutting down
+#[cfg(feature = "standalone")]
+pub fn cleanup_tasks(handles: TheracTaskHandles) {
+    handles.treatment_monitor.abort();
+    handles.housekeeper.abort();
 }
 
 /// Treatment monitor task
@@ -363,19 +407,6 @@ pub fn resume_treatment(state: SharedTheracState) {
 }
 
 /// Complete data entry
-/// Note: This does NOT immediately sync hardware - that happens asynchronously via the housekeeper
-/// This is intentional and creates the race condition!
-pub fn complete_data_entry(state: SharedTheracState) {
-    let mut s = state.write();
-    if s.phase == TPhase::DataEntry {
-        s.data_entry_complete = true;
-        s.editing_taking_place = false;
-        // DO NOT copy console settings to hardware here - let the housekeeper do it
-        // This creates the race condition window
-        s.add_log("Data entry complete - hardware sync pending".to_string());
-    }
-}
-
 /// Update console MEOS (operator input)
 pub fn update_console_meos(state: SharedTheracState, meos: Meos) {
     let mut s = state.write();
