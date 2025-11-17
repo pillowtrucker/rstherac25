@@ -533,8 +533,11 @@ impl AuthenticTuiApp {
         ]));
 
         // Lines 6-15: Parameter rows
+        // Note: ACTUAL shows console state (what the console believes is set),
+        // NOT hardware state (actual physical hardware). This is realistic -
+        // operators see what the system thinks is configured, not real-time sensor data.
         lines.push(self.render_param_line("Unit rate/min:",
-            &format!("{:.1}", state.hardware_params.dose_rate),
+            &format!("{:.1}", state.console_params.dose_rate),
             &self.unit_rate_input,
             self.current_field == InputField::UnitRate));
 
@@ -544,27 +547,27 @@ impl AuthenticTuiApp {
             self.current_field == InputField::MonitorUnits));
 
         lines.push(self.render_param_line("Time (minutes):",
-            &format!("{:.1}", if state.dose_delivered > 0.0 { state.dose_delivered / (state.hardware_params.dose_rate as f64) } else { 0.0 }),
+            &format!("{:.1}", if state.dose_delivered > 0.0 { state.dose_delivered / (state.console_params.dose_rate as f64) } else { 0.0 }),
             &self.time_input,
             self.current_field == InputField::Time));
 
         lines.push(self.render_param_line("Gantry rotation (deg):",
-            &format!("{}", state.hardware_params.gantry_angle),
+            &format!("{}", state.console_params.gantry_angle),
             &self.gantry_rot_input,
             self.current_field == InputField::GantryRot));
 
         lines.push(self.render_param_line("Collimator rotation (deg):",
-            &format!("{}", state.hardware_params.collimator_angle),
+            &format!("{}", state.console_params.collimator_angle),
             &self.collimator_rot_input,
             self.current_field == InputField::CollimatorRot));
 
         lines.push(self.render_param_line("Collimator x (cm):",
-            &format!("{:.1}", state.hardware_params.field_size_x),
+            &format!("{:.1}", state.console_params.field_size_x),
             &self.collimator_x_input,
             self.current_field == InputField::CollimatorX));
 
         lines.push(self.render_param_line("Collimator y (cm):",
-            &format!("{:.1}", state.hardware_params.field_size_y),
+            &format!("{:.1}", state.console_params.field_size_y),
             &self.collimator_y_input,
             self.current_field == InputField::CollimatorY));
 
