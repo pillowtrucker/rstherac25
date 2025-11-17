@@ -359,12 +359,12 @@ impl AuthenticTuiApp {
             "p" | "proceed" => {
                 // Set prescribed values from inputs
                 self.apply_prescription();
-                crate::simulator::complete_data_entry(self.state.clone());
+                crate::input::complete_data_entry(self.state.clone());
                 self.command_input.clear();
             }
             "t" | "treat" => {
                 self.apply_prescription();
-                crate::simulator::complete_data_entry(self.state.clone());
+                crate::input::complete_data_entry(self.state.clone());
                 crate::simulator::start_treatment(self.state.clone());
                 self.command_input.clear();
             }

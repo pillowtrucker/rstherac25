@@ -7,20 +7,32 @@ description = "Therac-25 radiation therapy simulator - educational recreation of
 license = "MIT OR Apache-2.0"
 
 [lib]
+name = "rstherac25"
+path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "rstherac25"
-path = "src/main.rs"
+name = "therac25"
+path = "src/bin/main.rs"
+required-features = ["standalone"]
 
 [dependencies]
+# Core dependencies (always included)
 parking_lot = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = "0.4"
 rand = "0.8"
 
-# WASM dependencies
+# TUI dependencies (optional, for rendering)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+# Async runtime (optional, for standalone mode)
+tokio = { version = "1.40", features = ["full"], optional = true }
+anyhow = { version = "1.0", optional = true }
+
+# WASM dependencies (optional)
 wasm-bindgen = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["console", "Window", "Document", "HtmlElement", "Element"] }
 console_error_panic_hook = { version = "0.1", optional = true }
@@ -32,12 +44,9 @@ wee_alloc = { version = "0.4", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1.40", features = ["full"] }
-ratatui = "0.29"
-crossterm = "0.28"
-anyhow = "1.0"
-
 [features]
-default = []
+default = ["embeddable"]
+embeddable = []  # Minimal features for embedding (core dependencies always included)
+standalone = ["embeddable", "ratatui", "crossterm", "tokio", "anyhow"]
+tui-render = ["ratatui"]  # Optional rendering support
 wasm = ["wasm-bindgen", "web-sys", "console_error_panic_hook", "wasm-bindgen-futures", "js-sys", "serde-wasm-bindgen", "wee_alloc"]
