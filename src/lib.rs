@@ -29,6 +29,9 @@ pub mod simulator;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tui_authentic;
+
 #[cfg(feature = "wasm")]
 pub mod wasm;
 

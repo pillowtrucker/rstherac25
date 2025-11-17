@@ -75,17 +75,45 @@ cargo build --release
 
 ## Usage
 
-### Native Terminal Interface
+The simulator provides two different terminal interfaces:
 
-Run the simulator with TUI:
+### 1. Analytical Interface (Default)
+
+The modern analytical interface provides comprehensive system visibility with:
+- Real-time hardware state monitoring
+- Console vs hardware parameter comparison
+- Treatment phase tracking
+- Detailed event logging
+- Safety status indicators
+
+Run with:
 
 ```bash
 cargo run --release
 ```
 
-### Operator Interface
+### 2. Authentic VT100 Interface
 
-The TUI simulates the actual Therac-25 operator terminal with form-based data entry:
+The authentic interface recreates the original 1980s DEC VT100 terminal experience as operators saw it:
+- Monochrome green-on-black terminal display
+- Original field layout with ACTUAL vs PRESCRIBED columns
+- Period-accurate MALFUNCTION messages
+- Authentic operator workflow
+- Minimal system visibility (like the real Therac-25)
+
+Run with:
+
+```bash
+cargo run --release -- --authentic
+# or
+cargo run --release -- -a
+```
+
+**Note:** The authentic interface demonstrates how the limited operator visibility contributed to the accidents. Operators had no insight into the underlying race conditions or hardware synchronization issues.
+
+### Operator Interface (Both Modes)
+
+The interfaces simulate the actual Therac-25 operator workflow with form-based data entry:
 
 **Data Entry Workflow:**
 
